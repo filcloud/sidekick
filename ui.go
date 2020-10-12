@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.package main
 
-package main
+package sidekick
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
-	"github.com/gdamore/tcell"
+	"github.com/gdamore/tcell/v2"
 	"github.com/minio/minio/pkg/console"
 	"github.com/rivo/tview"
 )
