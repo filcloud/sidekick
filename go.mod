@@ -1,4 +1,4 @@
-module github.com/minio/sidekick
+module github.com/filcloud/sidekick
 
 go 1.13
 

@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.package main
 
-package main
+package sidekick
 
 import (
 	"crypto/tls"
@@ -41,7 +41,7 @@ import (
 	"github.com/minio/minio/cmd/rest"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
-	"github.com/minio/sidekick/pkg"
+	"github.com/filcloud/sidekick/pkg"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/http2"
@@ -193,6 +193,7 @@ func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error
 		}
 		b.setOffline()
 	}
+	w.WriteHeader(http.StatusBadGateway)
 }
 
 // registerMetricsRouter - add handler functions for metrics.
@@ -381,20 +382,51 @@ func (s *site) nextProxy() *Backend {
 	return backends[idx]
 }
 
+type ResponseWriterWrapper struct {
+	http.ResponseWriter
+	bypassWrite bool
+}
+
+func (w *ResponseWriterWrapper) WriteHeader(statusCode int) {
+	if statusCode == http.StatusBadGateway {
+		w.bypassWrite = true
+	} else {
+		w.ResponseWriter.WriteHeader(statusCode)
+	}
+}
+
+func (w *ResponseWriterWrapper) Write(p []byte) (int, error) {
+	if w.bypassWrite {
+		return ioutil.Discard.Write(p)
+	} else {
+		return w.ResponseWriter.Write(p)
+	}
+}
+
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := s.nextProxy()
-	if backend != nil {
-		cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
-			if backend.cacheClient != nil {
-				cacheHandler(w, r, backend)(w, r)
-			} else {
-				backend.proxy.ServeHTTP(w, r)
+	for i := 0; i < 3; i++ { // retry maximum 3 times
+		backend := s.nextProxy()
+		if backend != nil {
+			cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
+				if backend.cacheClient != nil {
+					cacheHandler(w, r, backend)(w, r)
+				} else {
+					backend.proxy.ServeHTTP(w, r)
+				}
 			}
-		}
 
-		httpTraceHdrs(cacheHandlerFn, w, r, backend)
-		return
+			ww := &ResponseWriterWrapper{
+				ResponseWriter: w,
+			}
+			httpTraceHdrs(cacheHandlerFn, ww, r, backend)
+			if ww.bypassWrite && !backend.Online() {
+				continue // retry
+			}
+			return
+		} else {
+			break
+		}
 	}
 	w.WriteHeader(http.StatusBadGateway)
 }
